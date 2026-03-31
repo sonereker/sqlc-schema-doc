@@ -26,6 +26,7 @@ type column struct {
 	IsArray    bool
 	PrimaryKey bool
 	Unique     bool
+	Default    string
 	References string
 }
 
@@ -327,6 +328,8 @@ func extractColumn(colDef *pg_query.ColumnDef) column {
 			col.PrimaryKey = true
 		case pg_query.ConstrType_CONSTR_UNIQUE:
 			col.Unique = true
+		case pg_query.ConstrType_CONSTR_DEFAULT:
+			col.Default = deparseExpr(constraint.RawExpr)
 		case pg_query.ConstrType_CONSTR_FOREIGN:
 			col.References = buildReference(constraint)
 		}
@@ -361,6 +364,35 @@ func extractTypeName(typeName *pg_query.TypeName) string {
 	}
 
 	return name
+}
+
+func deparseExpr(node *pg_query.Node) string {
+	if node == nil {
+		return ""
+	}
+	selectStmt := &pg_query.Node{
+		Node: &pg_query.Node_SelectStmt{
+			SelectStmt: &pg_query.SelectStmt{
+				TargetList: []*pg_query.Node{
+					{
+						Node: &pg_query.Node_ResTarget{
+							ResTarget: &pg_query.ResTarget{
+								Val: node,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	result := &pg_query.ParseResult{
+		Stmts: []*pg_query.RawStmt{{Stmt: selectStmt}},
+	}
+	deparsed, err := pg_query.Deparse(result)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimPrefix(deparsed, "SELECT ")
 }
 
 func buildReference(constraint *pg_query.Constraint) string {
@@ -451,8 +483,8 @@ func generateMarkdown(tables []table, enums []enum) string {
 				continue
 			}
 
-			sb.WriteString("| Column | Type | Nullable | PK | Unique | References |\n")
-			sb.WriteString("|--------|------|----------|----|--------|------------|\n")
+			sb.WriteString("| Column | Type | Nullable | PK | Unique | Default | References |\n")
+			sb.WriteString("|--------|------|----------|----|--------|---------|------------|\n")
 			for _, c := range t.Columns {
 				nullable := "YES"
 				if c.NotNull {
@@ -466,7 +498,7 @@ func generateMarkdown(tables []table, enums []enum) string {
 				if c.Unique {
 					unique = "YES"
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, unique, c.References))
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, unique, c.Default, c.References))
 			}
 			sb.WriteString("\n")
 		}

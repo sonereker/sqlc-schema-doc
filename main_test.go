@@ -76,16 +76,17 @@ CREATE TABLE river_job (
 	assertContains(t, md, "### user_role")
 	assertContains(t, md, "`admin` | `member` | `viewer`")
 
-	assertContains(t, md, "| id | uuid | NO | YES |  |  |")
-	assertContains(t, md, "| email | citext | NO |  | YES |  |")
-	assertContains(t, md, "| name | text | YES |  |  |  |")
-	assertContains(t, md, "| role | user_role | NO |  |  |  |")
+	assertContains(t, md, "| id | uuid | NO | YES |  | gen_random_uuid() |  |")
+	assertContains(t, md, "| email | citext | NO |  | YES |  |  |")
+	assertContains(t, md, "| name | text | YES |  |  |  |  |")
+	assertContains(t, md, "| role | user_role | NO |  |  |  |  |")
+	assertContains(t, md, "| created_at | timestamptz | YES |  |  | now() |  |")
 
-	assertContains(t, md, "| user_id | uuid | NO |  |  | users(id) |")
-	assertContains(t, md, "| tags | text[] | YES |  |  |  |")
+	assertContains(t, md, "| user_id | uuid | NO |  |  |  | users(id) |")
+	assertContains(t, md, "| tags | text[] | YES |  |  |  |  |")
 
-	assertContains(t, md, "| avatar_url | text | NO |  |  |  |")
-	assertContains(t, md, "| bio | text | YES |  |  |  |")
+	assertContains(t, md, "| avatar_url | text | NO |  |  |  |  |")
+	assertContains(t, md, "| bio | text | YES |  |  |  |  |")
 
 	assertNotContains(t, md, "### river_job")
 }
@@ -114,8 +115,8 @@ CREATE TABLE books (
 	}
 
 	md := string(resp.Files[0].Contents)
-	assertContains(t, md, "| id | uuid | NO | YES |  |  |")
-	assertContains(t, md, "| author_id | uuid | NO |  |  | authors(id) |")
+	assertContains(t, md, "| id | uuid | NO | YES |  |  |  |")
+	assertContains(t, md, "| author_id | uuid | NO |  |  |  | authors(id) |")
 }
 
 func TestGenerateAlterTableFK(t *testing.T) {
@@ -141,7 +142,7 @@ ALTER TABLE products ADD CONSTRAINT fk_category FOREIGN KEY (category_id) REFERE
 	}
 
 	md := string(resp.Files[0].Contents)
-	assertContains(t, md, "| category_id | uuid | NO |  |  | categories(id) |")
+	assertContains(t, md, "| category_id | uuid | NO |  |  |  | categories(id) |")
 }
 
 func TestGenerateExcludeOption(t *testing.T) {
