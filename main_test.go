@@ -76,16 +76,70 @@ CREATE TABLE river_job (
 	assertContains(t, md, "### user_role")
 	assertContains(t, md, "`admin` | `member` | `viewer`")
 
-	assertContains(t, md, "| email | citext | NO |")
-	assertContains(t, md, "| name | text | YES |")
-	assertContains(t, md, "| role | user_role | NO |")
+	assertContains(t, md, "| email | citext | NO |  |")
+	assertContains(t, md, "| name | text | YES |  |")
+	assertContains(t, md, "| role | user_role | NO |  |")
 
-	assertContains(t, md, "| tags | text[] | YES |")
+	assertContains(t, md, "| user_id | uuid | NO | users(id) |")
+	assertContains(t, md, "| tags | text[] | YES |  |")
 
-	assertContains(t, md, "| avatar_url | text | NO |")
-	assertContains(t, md, "| bio | text | YES |")
+	assertContains(t, md, "| avatar_url | text | NO |  |")
+	assertContains(t, md, "| bio | text | YES |  |")
 
 	assertNotContains(t, md, "### river_job")
+}
+
+func TestGenerateTableLevelFK(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_tables.up.sql"), `
+CREATE TABLE authors (id UUID PRIMARY KEY);
+
+CREATE TABLE books (
+    id UUID PRIMARY KEY,
+    author_id UUID NOT NULL,
+    FOREIGN KEY (author_id) REFERENCES authors(id)
+);
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "| author_id | uuid | NO | authors(id) |")
+}
+
+func TestGenerateAlterTableFK(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_tables.up.sql"), `
+CREATE TABLE categories (id UUID PRIMARY KEY);
+CREATE TABLE products (id UUID PRIMARY KEY, category_id UUID NOT NULL);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_add_fk.up.sql"), `
+ALTER TABLE products ADD CONSTRAINT fk_category FOREIGN KEY (category_id) REFERENCES categories(id);
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "| category_id | uuid | NO | categories(id) |")
 }
 
 func TestGenerateExcludeOption(t *testing.T) {

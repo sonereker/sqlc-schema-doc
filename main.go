@@ -20,10 +20,11 @@ type options struct {
 }
 
 type column struct {
-	Name    string
-	Type    string
-	NotNull bool
-	IsArray bool
+	Name       string
+	Type       string
+	NotNull    bool
+	IsArray    bool
+	References string
 }
 
 type table struct {
@@ -186,6 +187,15 @@ func processCreateTable(stmt *pg_query.CreateStmt) *table {
 		t.Columns = append(t.Columns, col)
 	}
 
+	// Process table-level FOREIGN KEY constraints
+	for _, elt := range stmt.TableElts {
+		constraint := elt.GetConstraint()
+		if constraint == nil || constraint.Contype != pg_query.ConstrType_CONSTR_FOREIGN {
+			continue
+		}
+		applyForeignKey(t, constraint)
+	}
+
 	return t
 }
 
@@ -264,6 +274,12 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 					break
 				}
 			}
+
+		case pg_query.AlterTableType_AT_AddConstraint:
+			constraint := alterCmd.Def.GetConstraint()
+			if constraint != nil && constraint.Contype == pg_query.ConstrType_CONSTR_FOREIGN {
+				applyForeignKey(t, constraint)
+			}
 		}
 	}
 }
@@ -291,6 +307,8 @@ func extractColumn(colDef *pg_query.ColumnDef) column {
 			col.NotNull = true
 		case pg_query.ConstrType_CONSTR_PRIMARY:
 			col.NotNull = true
+		case pg_query.ConstrType_CONSTR_FOREIGN:
+			col.References = buildReference(constraint)
 		}
 	}
 
@@ -323,6 +341,31 @@ func extractTypeName(typeName *pg_query.TypeName) string {
 	}
 
 	return name
+}
+
+func buildReference(constraint *pg_query.Constraint) string {
+	if constraint.Pktable == nil {
+		return ""
+	}
+	ref := constraint.Pktable.Relname
+	if len(constraint.PkAttrs) > 0 {
+		ref += "(" + constraint.PkAttrs[0].GetString_().GetSval() + ")"
+	}
+	return ref
+}
+
+func applyForeignKey(t *table, constraint *pg_query.Constraint) {
+	if constraint.Pktable == nil || len(constraint.FkAttrs) == 0 {
+		return
+	}
+	fkCol := constraint.FkAttrs[0].GetString_().GetSval()
+	ref := buildReference(constraint)
+	for i, c := range t.Columns {
+		if c.Name == fkCol {
+			t.Columns[i].References = ref
+			break
+		}
+	}
 }
 
 func shouldExclude(name string, prefixes []string) bool {
@@ -363,14 +406,14 @@ func generateMarkdown(tables []table, enums []enum) string {
 				continue
 			}
 
-			sb.WriteString("| Column | Type | Nullable |\n")
-			sb.WriteString("|--------|------|----------|\n")
+			sb.WriteString("| Column | Type | Nullable | References |\n")
+			sb.WriteString("|--------|------|----------|------------|\n")
 			for _, c := range t.Columns {
 				nullable := "YES"
 				if c.NotNull {
 					nullable = "NO"
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", c.Name, c.Type, nullable))
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", c.Name, c.Type, nullable, c.References))
 			}
 			sb.WriteString("\n")
 		}
