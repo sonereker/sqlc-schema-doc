@@ -174,6 +174,39 @@ CREATE INDEX idx_users_name ON users (name);
 	assertContains(t, md, "`idx_users_name` INDEX on (name)")
 }
 
+func TestGenerateCheckConstraints(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_tables.up.sql"), `
+CREATE TABLE products (
+    id UUID PRIMARY KEY,
+    price INTEGER NOT NULL CHECK (price > 0),
+    name TEXT NOT NULL,
+    CONSTRAINT name_not_empty CHECK (length(name) > 0)
+);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_alter.up.sql"), `
+ALTER TABLE products ADD CONSTRAINT price_limit CHECK (price < 1000000);
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "**Check constraints:**")
+	assertContains(t, md, "price > 0")
+	assertContains(t, md, "`name_not_empty`:")
+	assertContains(t, md, "`price_limit`:")
+}
+
 func TestGenerateExcludeOption(t *testing.T) {
 	t.Parallel()
 

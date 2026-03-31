@@ -36,10 +36,16 @@ type index struct {
 	Unique  bool
 }
 
+type check struct {
+	Name       string
+	Expression string
+}
+
 type table struct {
 	Name    string
 	Columns []column
 	Indexes []index
+	Checks  []check
 }
 
 type enum struct {
@@ -198,6 +204,13 @@ func processCreateTable(stmt *pg_query.CreateStmt) *table {
 
 		col := extractColumn(colDef)
 		t.Columns = append(t.Columns, col)
+
+		for _, c := range colDef.Constraints {
+			constraint := c.GetConstraint()
+			if constraint != nil && constraint.Contype == pg_query.ConstrType_CONSTR_CHECK {
+				applyCheck(t, constraint)
+			}
+		}
 	}
 
 	// Process table-level constraints
@@ -213,6 +226,8 @@ func processCreateTable(stmt *pg_query.CreateStmt) *table {
 			applyPrimaryKey(t, constraint)
 		case pg_query.ConstrType_CONSTR_UNIQUE:
 			applyUnique(t, constraint)
+		case pg_query.ConstrType_CONSTR_CHECK:
+			applyCheck(t, constraint)
 		}
 	}
 
@@ -307,6 +322,8 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 				applyPrimaryKey(t, constraint)
 			case pg_query.ConstrType_CONSTR_UNIQUE:
 				applyUnique(t, constraint)
+			case pg_query.ConstrType_CONSTR_CHECK:
+				applyCheck(t, constraint)
 			}
 		}
 	}
@@ -452,6 +469,17 @@ func applyPrimaryKey(t *table, constraint *pg_query.Constraint) {
 	}
 }
 
+func applyCheck(t *table, constraint *pg_query.Constraint) {
+	expr := deparseExpr(constraint.RawExpr)
+	if expr == "" {
+		return
+	}
+	t.Checks = append(t.Checks, check{
+		Name:       constraint.Conname,
+		Expression: expr,
+	})
+}
+
 func applyUnique(t *table, constraint *pg_query.Constraint) {
 	for _, attr := range constraint.Keys {
 		col := attr.GetString_().GetSval()
@@ -534,6 +562,18 @@ func generateMarkdown(tables []table, enums []enum) string {
 				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, unique, c.Default, c.References))
 			}
 			sb.WriteString("\n")
+
+			if len(t.Checks) > 0 {
+				sb.WriteString("**Check constraints:**\n\n")
+				for _, chk := range t.Checks {
+					if chk.Name != "" {
+						sb.WriteString(fmt.Sprintf("- `%s`: %s\n", chk.Name, chk.Expression))
+					} else {
+						sb.WriteString(fmt.Sprintf("- %s\n", chk.Expression))
+					}
+				}
+				sb.WriteString("\n")
+			}
 
 			if len(t.Indexes) > 0 {
 				sb.WriteString("**Indexes:**\n\n")
