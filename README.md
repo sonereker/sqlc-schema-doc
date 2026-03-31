@@ -4,7 +4,7 @@ A [sqlc](https://sqlc.dev) process plugin that generates a clean, readable `SCHE
 
 ## Why?
 
-When using sqlc with migrations, your schema is spread across many `.up.sql` files containing noise like partition functions, seed data, `DO $$` blocks, and triggers. This plugin extracts just the essential information — tables, columns, types, nullability, and enums — into a single markdown file.
+When using sqlc with migrations, your schema is spread across many `.up.sql` files containing noise like partition functions, seed data, `DO $$` blocks, and triggers. This plugin extracts just the essential information — tables, columns, types, constraints, indexes, and enums — into a single markdown file.
 
 ## Installation
 
@@ -79,9 +79,9 @@ options:
 
 1. The plugin reads all `*.up.sql` files from the specified migrations directory
 2. Parses them using PostgreSQL's actual SQL parser ([pg_query_go](https://github.com/pganalyze/pg_query_go))
-3. Extracts `CREATE TABLE`, `CREATE TYPE ... AS ENUM`, and `ALTER TABLE ADD COLUMN` / `SET NOT NULL` statements
-4. Skips everything else (functions, triggers, indexes, inserts, DO blocks)
-5. Generates clean markdown with tables, columns, types, and nullability
+3. Extracts `CREATE TABLE`, `CREATE TYPE ... AS ENUM`, `ALTER TABLE`, and `CREATE INDEX` statements
+4. Skips everything else (functions, triggers, inserts, DO blocks)
+5. Generates clean markdown with tables, columns, types, nullability, primary keys, unique constraints, defaults, foreign key references, indexes, and check constraints
 
 ## Example Output
 
@@ -99,23 +99,31 @@ options:
 
 ### users
 
-| Column | Type | Nullable |
-|--------|------|----------|
-| id | uuid | NO |
-| email | citext | NO |
-| name | text | YES |
-| role | user_role | NO |
-| created_at | timestamptz | YES |
+| Column | Type | Nullable | PK | Unique | Default | References |
+|--------|------|----------|----|--------|---------|------------|
+| id | uuid | NO | YES |  | gen_random_uuid() |  |
+| email | citext | NO |  | YES |  |  |
+| name | text | YES |  |  |  |  |
+| role | user_role | NO |  |  |  |  |
+| created_at | timestamptz | YES |  |  | now() |  |
 
 ### posts
 
-| Column | Type | Nullable |
-|--------|------|----------|
-| id | uuid | NO |
-| user_id | uuid | NO |
-| title | text | NO |
-| tags | text[] | YES |
-| published_at | timestamptz | YES |
+| Column | Type | Nullable | PK | Unique | Default | References |
+|--------|------|----------|----|--------|---------|------------|
+| id | uuid | NO | YES |  | gen_random_uuid() |  |
+| user_id | uuid | NO |  |  |  | users(id) |
+| title | text | NO |  |  |  |  |
+| tags | text[] | YES |  |  |  |  |
+| published_at | timestamptz | YES |  |  |  |  |
+
+**Check constraints:**
+
+- `positive_price`: price > 0
+
+**Indexes:**
+
+- `idx_posts_user_id` INDEX on (user_id)
 ```
 
 ## License
