@@ -24,6 +24,7 @@ type column struct {
 	Type       string
 	NotNull    bool
 	IsArray    bool
+	PrimaryKey bool
 	References string
 }
 
@@ -187,13 +188,18 @@ func processCreateTable(stmt *pg_query.CreateStmt) *table {
 		t.Columns = append(t.Columns, col)
 	}
 
-	// Process table-level FOREIGN KEY constraints
+	// Process table-level constraints
 	for _, elt := range stmt.TableElts {
 		constraint := elt.GetConstraint()
-		if constraint == nil || constraint.Contype != pg_query.ConstrType_CONSTR_FOREIGN {
+		if constraint == nil {
 			continue
 		}
-		applyForeignKey(t, constraint)
+		switch constraint.Contype {
+		case pg_query.ConstrType_CONSTR_FOREIGN:
+			applyForeignKey(t, constraint)
+		case pg_query.ConstrType_CONSTR_PRIMARY:
+			applyPrimaryKey(t, constraint)
+		}
 	}
 
 	return t
@@ -277,8 +283,14 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 
 		case pg_query.AlterTableType_AT_AddConstraint:
 			constraint := alterCmd.Def.GetConstraint()
-			if constraint != nil && constraint.Contype == pg_query.ConstrType_CONSTR_FOREIGN {
+			if constraint == nil {
+				continue
+			}
+			switch constraint.Contype {
+			case pg_query.ConstrType_CONSTR_FOREIGN:
 				applyForeignKey(t, constraint)
+			case pg_query.ConstrType_CONSTR_PRIMARY:
+				applyPrimaryKey(t, constraint)
 			}
 		}
 	}
@@ -307,6 +319,7 @@ func extractColumn(colDef *pg_query.ColumnDef) column {
 			col.NotNull = true
 		case pg_query.ConstrType_CONSTR_PRIMARY:
 			col.NotNull = true
+			col.PrimaryKey = true
 		case pg_query.ConstrType_CONSTR_FOREIGN:
 			col.References = buildReference(constraint)
 		}
@@ -352,6 +365,19 @@ func buildReference(constraint *pg_query.Constraint) string {
 		ref += "(" + constraint.PkAttrs[0].GetString_().GetSval() + ")"
 	}
 	return ref
+}
+
+func applyPrimaryKey(t *table, constraint *pg_query.Constraint) {
+	for _, attr := range constraint.Keys {
+		pkCol := attr.GetString_().GetSval()
+		for i, c := range t.Columns {
+			if c.Name == pkCol {
+				t.Columns[i].PrimaryKey = true
+				t.Columns[i].NotNull = true
+				break
+			}
+		}
+	}
 }
 
 func applyForeignKey(t *table, constraint *pg_query.Constraint) {
@@ -406,14 +432,18 @@ func generateMarkdown(tables []table, enums []enum) string {
 				continue
 			}
 
-			sb.WriteString("| Column | Type | Nullable | References |\n")
-			sb.WriteString("|--------|------|----------|------------|\n")
+			sb.WriteString("| Column | Type | Nullable | PK | References |\n")
+			sb.WriteString("|--------|------|----------|----|------------|\n")
 			for _, c := range t.Columns {
 				nullable := "YES"
 				if c.NotNull {
 					nullable = "NO"
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s |\n", c.Name, c.Type, nullable, c.References))
+				pk := ""
+				if c.PrimaryKey {
+					pk = "YES"
+				}
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, c.References))
 			}
 			sb.WriteString("\n")
 		}
