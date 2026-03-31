@@ -145,6 +145,35 @@ ALTER TABLE products ADD CONSTRAINT fk_category FOREIGN KEY (category_id) REFERE
 	assertContains(t, md, "| category_id | uuid | NO |  |  |  | categories(id) |")
 }
 
+func TestGenerateIndexes(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_tables.up.sql"), `
+CREATE TABLE users (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL,
+    name TEXT
+);
+CREATE UNIQUE INDEX idx_users_email ON users (email);
+CREATE INDEX idx_users_name ON users (name);
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "**Indexes:**")
+	assertContains(t, md, "`idx_users_email` UNIQUE INDEX on (email)")
+	assertContains(t, md, "`idx_users_name` INDEX on (name)")
+}
+
 func TestGenerateExcludeOption(t *testing.T) {
 	t.Parallel()
 

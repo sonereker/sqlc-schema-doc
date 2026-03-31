@@ -30,9 +30,16 @@ type column struct {
 	References string
 }
 
+type index struct {
+	Name    string
+	Columns []string
+	Unique  bool
+}
+
 type table struct {
 	Name    string
 	Columns []column
+	Indexes []index
 }
 
 type enum struct {
@@ -157,6 +164,9 @@ func buildSchema(result *pg_query.ParseResult, excludePrefixes []string) ([]tabl
 
 		case stmt.GetAlterTableStmt() != nil:
 			processAlterTable(stmt.GetAlterTableStmt(), tableMap)
+
+		case stmt.GetIndexStmt() != nil:
+			processCreateIndex(stmt.GetIndexStmt(), tableMap)
 		}
 	}
 
@@ -299,6 +309,29 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 				applyUnique(t, constraint)
 			}
 		}
+	}
+}
+
+func processCreateIndex(stmt *pg_query.IndexStmt, tableMap map[string]*table) {
+	if stmt.Relation == nil {
+		return
+	}
+	t, exists := tableMap[stmt.Relation.Relname]
+	if !exists {
+		return
+	}
+
+	idx := index{
+		Name:   stmt.Idxname,
+		Unique: stmt.Unique,
+	}
+	for _, param := range stmt.IndexParams {
+		if elem := param.GetIndexElem(); elem != nil && elem.Name != "" {
+			idx.Columns = append(idx.Columns, elem.Name)
+		}
+	}
+	if len(idx.Columns) > 0 {
+		t.Indexes = append(t.Indexes, idx)
 	}
 }
 
@@ -501,6 +534,18 @@ func generateMarkdown(tables []table, enums []enum) string {
 				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, unique, c.Default, c.References))
 			}
 			sb.WriteString("\n")
+
+			if len(t.Indexes) > 0 {
+				sb.WriteString("**Indexes:**\n\n")
+				for _, idx := range t.Indexes {
+					kind := "INDEX"
+					if idx.Unique {
+						kind = "UNIQUE INDEX"
+					}
+					sb.WriteString(fmt.Sprintf("- `%s` %s on (%s)\n", idx.Name, kind, strings.Join(idx.Columns, ", ")))
+				}
+				sb.WriteString("\n")
+			}
 		}
 	}
 
