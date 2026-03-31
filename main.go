@@ -25,6 +25,7 @@ type column struct {
 	NotNull    bool
 	IsArray    bool
 	PrimaryKey bool
+	Unique     bool
 	References string
 }
 
@@ -199,6 +200,8 @@ func processCreateTable(stmt *pg_query.CreateStmt) *table {
 			applyForeignKey(t, constraint)
 		case pg_query.ConstrType_CONSTR_PRIMARY:
 			applyPrimaryKey(t, constraint)
+		case pg_query.ConstrType_CONSTR_UNIQUE:
+			applyUnique(t, constraint)
 		}
 	}
 
@@ -291,6 +294,8 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 				applyForeignKey(t, constraint)
 			case pg_query.ConstrType_CONSTR_PRIMARY:
 				applyPrimaryKey(t, constraint)
+			case pg_query.ConstrType_CONSTR_UNIQUE:
+				applyUnique(t, constraint)
 			}
 		}
 	}
@@ -320,6 +325,8 @@ func extractColumn(colDef *pg_query.ColumnDef) column {
 		case pg_query.ConstrType_CONSTR_PRIMARY:
 			col.NotNull = true
 			col.PrimaryKey = true
+		case pg_query.ConstrType_CONSTR_UNIQUE:
+			col.Unique = true
 		case pg_query.ConstrType_CONSTR_FOREIGN:
 			col.References = buildReference(constraint)
 		}
@@ -380,6 +387,18 @@ func applyPrimaryKey(t *table, constraint *pg_query.Constraint) {
 	}
 }
 
+func applyUnique(t *table, constraint *pg_query.Constraint) {
+	for _, attr := range constraint.Keys {
+		col := attr.GetString_().GetSval()
+		for i, c := range t.Columns {
+			if c.Name == col {
+				t.Columns[i].Unique = true
+				break
+			}
+		}
+	}
+}
+
 func applyForeignKey(t *table, constraint *pg_query.Constraint) {
 	if constraint.Pktable == nil || len(constraint.FkAttrs) == 0 {
 		return
@@ -432,8 +451,8 @@ func generateMarkdown(tables []table, enums []enum) string {
 				continue
 			}
 
-			sb.WriteString("| Column | Type | Nullable | PK | References |\n")
-			sb.WriteString("|--------|------|----------|----|------------|\n")
+			sb.WriteString("| Column | Type | Nullable | PK | Unique | References |\n")
+			sb.WriteString("|--------|------|----------|----|--------|------------|\n")
 			for _, c := range t.Columns {
 				nullable := "YES"
 				if c.NotNull {
@@ -443,7 +462,11 @@ func generateMarkdown(tables []table, enums []enum) string {
 				if c.PrimaryKey {
 					pk = "YES"
 				}
-				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, c.References))
+				unique := ""
+				if c.Unique {
+					unique = "YES"
+				}
+				sb.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n", c.Name, c.Type, nullable, pk, unique, c.References))
 			}
 			sb.WriteString("\n")
 		}
