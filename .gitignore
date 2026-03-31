@@ -1,0 +1,8 @@
+sqlc-schema-doc
+.idea/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
