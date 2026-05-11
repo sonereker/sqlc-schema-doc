@@ -259,6 +259,93 @@ func TestGenerateMissingOption(t *testing.T) {
 	}
 }
 
+func TestGenerateDropTable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE users (id UUID PRIMARY KEY);
+CREATE TABLE temp_table (id UUID PRIMARY KEY);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop_temp.up.sql"), `
+DROP TABLE temp_table;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### users")
+	assertNotContains(t, md, "### temp_table")
+}
+
+func TestGenerateDropEnum(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TYPE status AS ENUM ('active', 'inactive');
+CREATE TABLE users (id UUID PRIMARY KEY);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop_enum.up.sql"), `
+DROP TYPE status;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### users")
+	assertNotContains(t, md, "### status")
+}
+
+func TestGenerateIncludeDeletedObjects(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TYPE status AS ENUM ('active', 'inactive');
+CREATE TABLE users (id UUID PRIMARY KEY);
+CREATE TABLE temp_table (id UUID PRIMARY KEY);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop.up.sql"), `
+DROP TABLE temp_table;
+DROP TYPE status;
+`)
+
+	opts, _ := json.Marshal(options{
+		MigrationsDir:         dir,
+		IncludeDeletedObjects: true,
+	})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### users")
+	assertContains(t, md, "### temp_table")
+	assertContains(t, md, "### status")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
