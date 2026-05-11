@@ -63,6 +63,7 @@ This generates `SCHEMA.md` alongside your normal sqlc output. Every time you run
 |--------|----------|-------------|
 | `migrations_dir` | Yes | Path to the directory containing migration files (relative to `sqlc.yaml`) |
 | `exclude` | No | List of table name prefixes to exclude (default: `["river_"]`) |
+| `include_deleted_objects` | No | Keep tables and enums that were later dropped by `DROP TABLE` / `DROP TYPE` in the output (default: `false`) |
 
 ### Custom excludes
 
@@ -79,9 +80,10 @@ options:
 
 1. The plugin reads all `*.up.sql` files from the specified migrations directory
 2. Parses them using PostgreSQL's actual SQL parser ([pg_query_go](https://github.com/pganalyze/pg_query_go))
-3. Extracts `CREATE TABLE`, `CREATE TYPE ... AS ENUM`, `ALTER TABLE`, and `CREATE INDEX` statements
-4. Skips everything else (functions, triggers, inserts, DO blocks)
-5. Generates clean markdown with tables, columns, types, nullability, primary keys, unique constraints, defaults, foreign key references, indexes, and check constraints
+3. Extracts `CREATE TABLE`, `CREATE TYPE ... AS ENUM`, `ALTER TABLE`, `CREATE INDEX`, `DROP TABLE`, and `DROP TYPE` statements
+4. Removes tables and enums dropped by later migrations so the output reflects the current schema (set `include_deleted_objects: true` to keep them)
+5. Skips everything else (functions, triggers, inserts, DO blocks)
+6. Generates clean markdown with tables, columns, types, nullability, primary keys, unique constraints, defaults, foreign key references, indexes, and check constraints
 
 ## Example Output
 
