@@ -15,8 +15,9 @@ import (
 )
 
 type options struct {
-	MigrationsDir string   `json:"migrations_dir"`
-	Exclude       []string `json:"exclude"`
+	MigrationsDir         string   `json:"migrations_dir"`
+	Exclude               []string `json:"exclude"`
+	IncludeDeletedObjects bool     `json:"include_deleted_objects"`
 }
 
 type column struct {
@@ -111,7 +112,7 @@ func generate(_ context.Context, req *plugin.GenerateRequest) (*plugin.GenerateR
 	}
 
 	// Build schema from AST
-	tables, enums := buildSchema(result, opts.Exclude)
+	tables, enums := buildSchema(result, opts.Exclude, opts.IncludeDeletedObjects)
 
 	// Generate markdown
 	md := generateMarkdown(tables, enums)
@@ -146,7 +147,7 @@ func parseFilesIndividually(files []string) (*pg_query.ParseResult, error) {
 	return combined, nil
 }
 
-func buildSchema(result *pg_query.ParseResult, excludePrefixes []string) ([]table, []enum) {
+func buildSchema(result *pg_query.ParseResult, excludePrefixes []string, includeDeletedObjects bool) ([]table, []enum) {
 	tableMap := make(map[string]*table)
 	var tableOrder []string
 	var enums []enum
@@ -173,18 +174,57 @@ func buildSchema(result *pg_query.ParseResult, excludePrefixes []string) ([]tabl
 
 		case stmt.GetIndexStmt() != nil:
 			processCreateIndex(stmt.GetIndexStmt(), tableMap)
+
+		case stmt.GetDropStmt() != nil:
+			if !includeDeletedObjects {
+				processDropStmt(stmt.GetDropStmt(), tableMap, &enums)
+			}
 		}
 	}
 
 	// Build ordered table list
 	tables := make([]table, 0, len(tableOrder))
+	seen := make(map[string]bool)
 	for _, name := range tableOrder {
-		if t, ok := tableMap[name]; ok {
+		if t, ok := tableMap[name]; ok && !seen[name] {
+			seen[name] = true
 			tables = append(tables, *t)
 		}
 	}
 
 	return tables, enums
+}
+
+func processDropStmt(stmt *pg_query.DropStmt, tableMap map[string]*table, enums *[]enum) {
+	for _, obj := range stmt.Objects {
+		name := extractDropName(obj)
+		if name == "" {
+			continue
+		}
+		switch stmt.RemoveType {
+		case pg_query.ObjectType_OBJECT_TABLE:
+			delete(tableMap, name)
+		case pg_query.ObjectType_OBJECT_TYPE:
+			for i, e := range *enums {
+				if e.Name == name {
+					*enums = append((*enums)[:i], (*enums)[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+}
+
+func extractDropName(obj *pg_query.Node) string {
+	if list := obj.GetList(); list != nil && len(list.Items) > 0 {
+		last := list.Items[len(list.Items)-1]
+		return last.GetString_().GetSval()
+	}
+	if tn := obj.GetTypeName(); tn != nil && len(tn.Names) > 0 {
+		last := tn.Names[len(tn.Names)-1]
+		return last.GetString_().GetSval()
+	}
+	return ""
 }
 
 func processCreateTable(stmt *pg_query.CreateStmt) *table {
