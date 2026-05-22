@@ -211,6 +211,12 @@ func processDropStmt(stmt *pg_query.DropStmt, tableMap map[string]*table, enums 
 					break
 				}
 			}
+		case pg_query.ObjectType_OBJECT_INDEX:
+			for _, t := range tableMap {
+				if removeIndex(t, name) {
+					break
+				}
+			}
 		}
 	}
 }
@@ -349,6 +355,9 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 					break
 				}
 			}
+
+		case pg_query.AlterTableType_AT_DropColumn:
+			dropColumn(t, alterCmd.Name)
 
 		case pg_query.AlterTableType_AT_AddConstraint:
 			constraint := alterCmd.Def.GetConstraint()
@@ -530,6 +539,42 @@ func applyUnique(t *table, constraint *pg_query.Constraint) {
 			}
 		}
 	}
+}
+
+func removeIndex(t *table, name string) bool {
+	for i, idx := range t.Indexes {
+		if idx.Name == name {
+			t.Indexes = append(t.Indexes[:i], t.Indexes[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+func dropColumn(t *table, name string) {
+	if name == "" {
+		return
+	}
+	for i, col := range t.Columns {
+		if col.Name == name {
+			t.Columns = append(t.Columns[:i], t.Columns[i+1:]...)
+			break
+		}
+	}
+	filtered := t.Indexes[:0]
+	for _, idx := range t.Indexes {
+		referencesDropped := false
+		for _, c := range idx.Columns {
+			if c == name {
+				referencesDropped = true
+				break
+			}
+		}
+		if !referencesDropped {
+			filtered = append(filtered, idx)
+		}
+	}
+	t.Indexes = filtered
 }
 
 func applyForeignKey(t *table, constraint *pg_query.Constraint) {

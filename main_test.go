@@ -346,6 +346,69 @@ DROP TYPE status;
 	assertContains(t, md, "### status")
 }
 
+func TestGenerateDropIndex(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE users (id UUID PRIMARY KEY, email TEXT, name TEXT);
+CREATE INDEX users_email_idx ON users (email);
+CREATE INDEX users_name_idx ON users (name);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop_index.up.sql"), `
+DROP INDEX users_email_idx;
+DROP INDEX IF EXISTS users_missing_idx;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "users_name_idx")
+	assertNotContains(t, md, "users_email_idx")
+}
+
+func TestGenerateAlterTableDropColumn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE lists (
+    id UUID PRIMARY KEY,
+    owner_id TEXT NOT NULL,
+    is_default BOOLEAN
+);
+CREATE UNIQUE INDEX lists_owner_is_default_idx ON lists (owner_id, is_default);
+CREATE INDEX lists_owner_idx ON lists (owner_id);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop_column.up.sql"), `
+ALTER TABLE lists DROP COLUMN is_default;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### lists")
+	assertContains(t, md, "lists_owner_idx")
+	assertNotContains(t, md, "is_default")
+	assertNotContains(t, md, "lists_owner_is_default_idx")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
