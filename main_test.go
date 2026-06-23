@@ -409,6 +409,68 @@ ALTER TABLE lists DROP COLUMN is_default;
 	assertNotContains(t, md, "lists_owner_is_default_idx")
 }
 
+func TestGenerateAlterTableDropColumnRemovesChecks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE lists (
+    id UUID PRIMARY KEY,
+    owner_id TEXT NOT NULL CHECK (owner_id <> ''),
+    name TEXT NOT NULL CHECK (name <> '')
+);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop_column.up.sql"), `
+ALTER TABLE lists DROP COLUMN owner_id;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### lists")
+	assertContains(t, md, "name <> ''")
+	assertNotContains(t, md, "owner_id <> ''")
+}
+
+func TestGenerateAlterTableDropConstraint(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE credits (
+    id UUID PRIMARY KEY,
+    target_group TEXT NOT NULL,
+    user_id TEXT,
+    CONSTRAINT user_id_enforcement CHECK ((target_group = 'user' AND user_id IS NOT NULL) OR target_group <> 'user')
+);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_drop_constraint.up.sql"), `
+ALTER TABLE credits DROP CONSTRAINT user_id_enforcement;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### credits")
+	assertNotContains(t, md, "user_id_enforcement")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {

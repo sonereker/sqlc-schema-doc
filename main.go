@@ -40,6 +40,7 @@ type index struct {
 type check struct {
 	Name       string
 	Expression string
+	Columns    []string
 }
 
 type table struct {
@@ -359,6 +360,17 @@ func processAlterTable(stmt *pg_query.AlterTableStmt, tableMap map[string]*table
 		case pg_query.AlterTableType_AT_DropColumn:
 			dropColumn(t, alterCmd.Name)
 
+		case pg_query.AlterTableType_AT_DropConstraint:
+			// Only CHECK constraints are tracked by name; unique/PK/FK are
+			// reflected on columns and not removable here.
+			checks := t.Checks[:0]
+			for _, chk := range t.Checks {
+				if chk.Name != alterCmd.Name {
+					checks = append(checks, chk)
+				}
+			}
+			t.Checks = checks
+
 		case pg_query.AlterTableType_AT_AddConstraint:
 			constraint := alterCmd.Def.GetConstraint()
 			if constraint == nil {
@@ -526,7 +538,69 @@ func applyCheck(t *table, constraint *pg_query.Constraint) {
 	t.Checks = append(t.Checks, check{
 		Name:       constraint.Conname,
 		Expression: expr,
+		Columns:    columnRefsInExpr(constraint.RawExpr),
 	})
+}
+
+// columnRefsInExpr walks a CHECK expression and returns the names of every column
+// it references, so the check can be dropped when one of those columns is dropped.
+func columnRefsInExpr(node *pg_query.Node) []string {
+	var cols []string
+	var walk func(n *pg_query.Node)
+	walk = func(n *pg_query.Node) {
+		if n == nil {
+			return
+		}
+		switch {
+		case n.GetColumnRef() != nil:
+			for _, f := range n.GetColumnRef().Fields {
+				if s := f.GetString_(); s != nil && s.GetSval() != "" {
+					cols = append(cols, s.GetSval())
+				}
+			}
+		case n.GetAExpr() != nil:
+			walk(n.GetAExpr().Lexpr)
+			walk(n.GetAExpr().Rexpr)
+		case n.GetBoolExpr() != nil:
+			for _, a := range n.GetBoolExpr().Args {
+				walk(a)
+			}
+		case n.GetNullTest() != nil:
+			walk(n.GetNullTest().Arg)
+		case n.GetBooleanTest() != nil:
+			walk(n.GetBooleanTest().Arg)
+		case n.GetFuncCall() != nil:
+			for _, a := range n.GetFuncCall().Args {
+				walk(a)
+			}
+		case n.GetCoalesceExpr() != nil:
+			for _, a := range n.GetCoalesceExpr().Args {
+				walk(a)
+			}
+		case n.GetTypeCast() != nil:
+			walk(n.GetTypeCast().Arg)
+		case n.GetAArrayExpr() != nil:
+			for _, e := range n.GetAArrayExpr().Elements {
+				walk(e)
+			}
+		case n.GetList() != nil:
+			for _, it := range n.GetList().Items {
+				walk(it)
+			}
+		case n.GetCaseExpr() != nil:
+			ce := n.GetCaseExpr()
+			walk(ce.Arg)
+			for _, w := range ce.Args {
+				walk(w)
+			}
+			walk(ce.Defresult)
+		case n.GetCaseWhen() != nil:
+			walk(n.GetCaseWhen().Expr)
+			walk(n.GetCaseWhen().Result)
+		}
+	}
+	walk(node)
+	return cols
 }
 
 func applyUnique(t *table, constraint *pg_query.Constraint) {
@@ -575,6 +649,21 @@ func dropColumn(t *table, name string) {
 		}
 	}
 	t.Indexes = filtered
+
+	checks := t.Checks[:0]
+	for _, chk := range t.Checks {
+		referencesDropped := false
+		for _, c := range chk.Columns {
+			if c == name {
+				referencesDropped = true
+				break
+			}
+		}
+		if !referencesDropped {
+			checks = append(checks, chk)
+		}
+	}
+	t.Checks = checks
 }
 
 func applyForeignKey(t *table, constraint *pg_query.Constraint) {
