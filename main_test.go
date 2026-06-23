@@ -471,6 +471,65 @@ ALTER TABLE credits DROP CONSTRAINT user_id_enforcement;
 	assertNotContains(t, md, "user_id_enforcement")
 }
 
+func TestGenerateRenameColumn(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE search_queries (
+    id UUID PRIMARY KEY,
+    owner_company_id TEXT NOT NULL,
+    name TEXT NOT NULL
+);
+CREATE INDEX search_queries_owner_idx ON search_queries (owner_company_id, name);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_rename.up.sql"), `
+ALTER TABLE search_queries RENAME COLUMN owner_company_id TO company_key;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "| company_key | text |")
+	assertNotContains(t, md, "owner_company_id")
+	// index column reference is updated too
+	assertContains(t, md, "on (company_key, name)")
+}
+
+func TestGenerateRenameTable(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "001_create.up.sql"), `
+CREATE TABLE old_name (id UUID PRIMARY KEY);
+`)
+
+	writeFile(t, filepath.Join(dir, "002_rename.up.sql"), `
+ALTER TABLE old_name RENAME TO new_name;
+`)
+
+	opts, _ := json.Marshal(options{MigrationsDir: dir})
+	req := &plugin.GenerateRequest{PluginOptions: opts}
+
+	resp, err := generate(context.Background(), req)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+
+	md := string(resp.Files[0].Contents)
+	assertContains(t, md, "### new_name")
+	assertNotContains(t, md, "### old_name")
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {

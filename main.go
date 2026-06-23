@@ -180,6 +180,9 @@ func buildSchema(result *pg_query.ParseResult, excludePrefixes []string, include
 			if !includeDeletedObjects {
 				processDropStmt(stmt.GetDropStmt(), tableMap, &enums)
 			}
+
+		case stmt.GetRenameStmt() != nil:
+			processRename(stmt.GetRenameStmt(), tableMap, &tableOrder)
 		}
 	}
 
@@ -217,6 +220,94 @@ func processDropStmt(stmt *pg_query.DropStmt, tableMap map[string]*table, enums 
 				if removeIndex(t, name) {
 					break
 				}
+			}
+		}
+	}
+}
+
+func processRename(stmt *pg_query.RenameStmt, tableMap map[string]*table, tableOrder *[]string) {
+	switch stmt.RenameType {
+	case pg_query.ObjectType_OBJECT_COLUMN:
+		if stmt.Relation == nil {
+			return
+		}
+		if t, ok := tableMap[stmt.Relation.Relname]; ok {
+			renameColumn(t, stmt.Subname, stmt.Newname)
+		}
+
+	case pg_query.ObjectType_OBJECT_TABLE:
+		if stmt.Relation == nil {
+			return
+		}
+		old := stmt.Relation.Relname
+		t, ok := tableMap[old]
+		if !ok || stmt.Newname == "" {
+			return
+		}
+		t.Name = stmt.Newname
+		delete(tableMap, old)
+		tableMap[stmt.Newname] = t
+		for i, n := range *tableOrder {
+			if n == old {
+				(*tableOrder)[i] = stmt.Newname
+			}
+		}
+
+	case pg_query.ObjectType_OBJECT_INDEX:
+		if stmt.Relation == nil {
+			return
+		}
+		for _, t := range tableMap {
+			renamed := false
+			for i := range t.Indexes {
+				if t.Indexes[i].Name == stmt.Relation.Relname {
+					t.Indexes[i].Name = stmt.Newname
+					renamed = true
+					break
+				}
+			}
+			if renamed {
+				break
+			}
+		}
+
+	case pg_query.ObjectType_OBJECT_TABCONSTRAINT:
+		if stmt.Relation == nil {
+			return
+		}
+		if t, ok := tableMap[stmt.Relation.Relname]; ok {
+			for i := range t.Checks {
+				if t.Checks[i].Name == stmt.Subname {
+					t.Checks[i].Name = stmt.Newname
+				}
+			}
+		}
+	}
+}
+
+// renameColumn renames a column and updates references to it in indexes and the
+// tracked column lists of check constraints.
+func renameColumn(t *table, oldName, newName string) {
+	if oldName == "" || newName == "" {
+		return
+	}
+	for i := range t.Columns {
+		if t.Columns[i].Name == oldName {
+			t.Columns[i].Name = newName
+			break
+		}
+	}
+	for i := range t.Indexes {
+		for j, c := range t.Indexes[i].Columns {
+			if c == oldName {
+				t.Indexes[i].Columns[j] = newName
+			}
+		}
+	}
+	for i := range t.Checks {
+		for j, c := range t.Checks[i].Columns {
+			if c == oldName {
+				t.Checks[i].Columns[j] = newName
 			}
 		}
 	}
